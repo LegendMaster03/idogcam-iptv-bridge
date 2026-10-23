@@ -10,12 +10,13 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 from .config import Settings
+from .guide import PublishedNoticeCache, make_xmltv
 from .hls import TokenMap, rewrite_playlist, same_origin
 from .viewer import ViewerMetadata, parse_viewer
 
@@ -51,8 +52,9 @@ class MetadataCacheEntry:
 
 
 class Bridge:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, notice_cache_path: str | None = None):
         self.settings = settings
+        self.notice_cache = PublishedNoticeCache(notice_cache_path)
         self.cache: dict[int, MetadataCacheEntry] = {}
         self.locks: dict[int, asyncio.Lock] = {camera: asyncio.Lock() for camera in settings.cameras}
         self.tokens = TokenMap()
@@ -89,6 +91,15 @@ class Bridge:
                         raise ValueError('Viewer page oversized')
                     payload = await _read_bounded(res, MAX_HTML)
                 result = parse_viewer(viewer_id, payload.decode('utf-8', 'replace'), facility.name, facility.stream_origin)
+                if result.offline_message:
+                    try:
+                        self.notice_cache.remember(viewer_id, result.offline_message)
+                    except OSError:
+                        LOG.warning('Unable to persist public schedule notice for viewer %d', viewer_id)
+                else:
+                    last_notice = self.notice_cache.get(viewer_id)
+                    if last_notice:
+                        result = replace(result, offline_message=last_notice)
             except (ClientError, asyncio.TimeoutError, UnicodeError, ValueError) as exc:
                 LOG.warning('Metadata refresh failed for viewer %d (%s)', viewer_id, type(exc).__name__)
                 result = previous.value if previous else None
@@ -116,6 +127,16 @@ async def channels(request: web.Request) -> web.Response:
         )
         lines.append(f'{request.app[BASE_URL_KEY]}/hls/{id_}/index.m3u8')
     return web.Response(text='\n'.join(lines) + '\n', content_type='audio/x-mpegurl', headers={'Cache-Control': 'no-store'})
+
+
+async def guide_xmltv(request: web.Request) -> web.Response:
+    bridge: Bridge = request.app[BRIDGE_KEY]
+    metadata = await asyncio.gather(*(bridge.metadata(v) for v in bridge.settings.cameras))
+    sources = [(id_, facility, meta)
+               for (id_, facility), meta in zip(bridge.settings.cameras.items(), metadata)]
+    document = make_xmltv(sources)
+    return web.Response(body=document, content_type='application/xml',
+                        headers={'Cache-Control': 'no-store'})
 
 
 async def info(request: web.Request) -> web.Response:
@@ -225,15 +246,17 @@ async def on_cleanup(app: web.Application) -> None:
     await app[BRIDGE_KEY].close()
 
 
-def create_app(settings: Settings, base_url: str = 'http://idogcam-bridge:8080') -> web.Application:
+def create_app(settings: Settings, base_url: str = 'http://idogcam-bridge:8080',
+               notice_cache_path: str | None = None) -> web.Application:
     parsed = urlsplit(base_url)
     if parsed.scheme != 'http' or not parsed.hostname or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
         raise ValueError('Base URL should be an internal HTTP origin, such as http://idogcam-bridge:8080')
     app = web.Application(client_max_size=MAX_MANIFEST)
-    app[BRIDGE_KEY] = Bridge(settings)
+    app[BRIDGE_KEY] = Bridge(settings, notice_cache_path)
     app[BASE_URL_KEY] = base_url.rstrip('/')
     app.router.add_get('/healthz', health)
     app.router.add_get('/channels.m3u', channels)
+    app.router.add_get('/xmltv.xml', guide_xmltv)
     app.router.add_get('/api/channels', info)
     app.router.add_get('/hls/{viewer_id:\\d+}/index.m3u8', hls_playlist)
     app.router.add_get('/media/{viewer_id:\\d+}/{token:[A-Za-z0-9_-]+}.{ext:[a-z0-9]+}', media)
@@ -249,7 +272,9 @@ def main() -> None:
     base_url = os.environ.get('IDOGCAM_BASE_URL', 'http://idogcam-bridge:8080')
     port = int(os.environ.get('IDOGCAM_PORT', '8080'))
     LOG.info('Starting bridge with %s facilities and %s authorized viewer IDs', len(settings.facilities), len(settings.cameras))
-    web.run_app(create_app(settings, base_url=base_url), host='0.0.0.0', port=port, access_log=None)
+    notice_cache = os.environ.get('IDOGCAM_NOTICE_CACHE')
+    web.run_app(create_app(settings, base_url=base_url, notice_cache_path=notice_cache),
+                host='0.0.0.0', port=port, access_log=None)
 
 
 if __name__ == '__main__':

@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import urlsplit
 
 
@@ -15,6 +16,7 @@ class Facility:
     viewer_ids: tuple[int, ...]
     stream_origin: str | None = None
     pending_viewer_ids: tuple[int, ...] = ()
+    time_zone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,15 +76,25 @@ def load_settings(path: str | Path) -> Settings:
         viewer_ids = tuple(item['viewer_ids'])
         pending_ids = tuple(item.get('pending_viewer_ids', []))
         if not viewer_ids or len(viewer_ids) != len(set(viewer_ids)):
-            raise ValueError('Facility must have unique, nonempty camera IDs')
-        if len(pending_ids) != len(set(pending_ids)) or set(pending_ids) & set(viewer_ids):
-            raise ValueError('Invalid pending IDs')
+            raise ValueError('Facility must have unique, nonempty published camera IDs')
+        if len(pending_ids) != len(set(pending_ids)):
+            raise ValueError('Facility pending camera IDs must be unique')
+        if set(viewer_ids) & set(pending_ids):
+            raise ValueError('Camera can not be both published and pending')
         for viewer_id in (*viewer_ids, *pending_ids):
             if type(viewer_id) is not int or viewer_id <= 0 or viewer_id in ids:
                 raise ValueError('Camera IDs must be unique positive integers across facilities')
             ids.add(viewer_id)
         origin = validate_stream_origin(item['stream_origin']) if item.get('stream_origin') else None
-        facilities.append(Facility(key, name, viewer_ids, origin, pending_ids))
+        timezone = item.get('time_zone')
+        if timezone is not None:
+            if not isinstance(timezone, str) or not timezone or len(timezone) > 80:
+                raise ValueError('Invalid facility time zone')
+            try:
+                ZoneInfo(timezone)
+            except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
+                raise ValueError('Unknown facility time zone') from exc
+        facilities.append(Facility(key, name, viewer_ids, origin, pending_ids, timezone))
     if not facilities:
         raise ValueError('At least one facility is required')
     ttl = raw.get('metadata_ttl_seconds', 300)
