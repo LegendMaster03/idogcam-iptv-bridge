@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 
@@ -122,3 +123,91 @@ async def test_401_refreshes_viewer_credentials_once_without_leakage():
             assert 'old-viewer-key' not in body
             assert attempted == ['old-viewer-key', 'new-viewer-key']
             assert state['refresh_count'] == 1
+
+
+@pytest.mark.asyncio
+async def test_metadata_reader_waits_for_complete_chunked_page():
+    """Regression: a first two-byte HTTP chunk is not an entire viewer page."""
+    source = (
+        '<html><head><title>DogBeach - Ponte Vedra Beach - Sandcastle Play Field</title>'
+        '</head><body><p>Camera access is from 8am - 5pm.</p></body></html>'
+    ).encode()
+
+    async def viewer(request):
+        response = web.StreamResponse(status=200, headers={'Content-Type': 'text/html'})
+        await response.prepare(request)
+        await response.write(source[:2])
+        await asyncio.sleep(0.08)
+        await response.write(source[2:])
+        await response.write_eof()
+        return response
+
+    upstream = web.Application()
+    upstream.router.add_get('/viewer', viewer)
+    async with TestServer(upstream) as us:
+        facility = Facility('dogbeach', 'DogBeach - Ponte Vedra Beach', (10088,))
+        app = create_app(Settings((facility,)), 'http://idogcam-bridge:8080')
+        async with TestClient(TestServer(app)) as client:
+            bridge = app[BRIDGE_KEY]
+            original = bridge._session()
+            class RedirectSession:
+                def get(self, _url, **kwargs):
+                    return original.get(str(us.make_url('/viewer')), **kwargs)
+            bridge._session = lambda: RedirectSession()
+            response = await client.get('/api/channels')
+            assert response.status == 200
+            info = (await response.json())['channels'][0]
+            assert info['viewer_metadata_available'] is True
+            assert info['name'] == 'Sandcastle Play Field'
+            assert info['offline_message'] == 'Camera access is from 8am - 5pm.'
+            assert info['stream_resolvable'] is False
+
+
+@pytest.mark.asyncio
+async def test_hls_reader_waits_for_complete_chunked_playlist():
+    playlist = (b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\n'
+                b'++hls_media?cameraNum=9&auth=fixture&index=1\n')
+
+    async def manifest(request):
+        response = web.StreamResponse(status=200,
+                                      headers={'Content-Type': 'application/x-mpegurl'})
+        await response.prepare(request)
+        await response.write(playlist[:2])
+        await asyncio.sleep(0.08)
+        await response.write(playlist[2:])
+        await response.write_eof()
+        return response
+
+    upstream = web.Application()
+    upstream.router.add_get('/++hls_mediaplaylist', manifest)
+    async with TestServer(upstream) as us:
+        app = create_app(Settings((Facility('dogbeach', 'DogBeach', (10088,)),)),
+                         'http://idogcam-bridge:8080')
+        async def source(_viewer_id):
+            return str(us.make_url('/++hls_mediaplaylist?cameraNum=9&auth=fixture'))
+        app[BRIDGE_KEY].upstream_for = source
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get('/hls/10088/index.m3u8')
+            assert response.status == 200
+            text = await response.text()
+            assert text.startswith('#EXTM3U\n')
+            assert re.search(r'/media/10088/[\w-]+\.ts', text)
+            assert 'fixture' not in text
+
+
+@pytest.mark.asyncio
+async def test_bounded_response_reader_rejects_oversized_chunked_body():
+    from idogcam_bridge.server import _read_bounded
+
+    class FakeContent:
+        async def iter_chunked(self, _size):
+            yield b'ab'
+            yield b'cd'
+            yield b'ef'
+
+    class FakeResponse:
+        content = FakeContent()
+
+    assert await _read_bounded(FakeResponse(), 6) == b'abcdef'
+    with pytest.raises(ValueError, match='size limit'):
+        await _read_bounded(FakeResponse(), 5)

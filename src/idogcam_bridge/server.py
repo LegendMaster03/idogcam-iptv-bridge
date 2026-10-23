@@ -26,6 +26,20 @@ MAX_HTML = 1_000_000
 MAX_MANIFEST = 512_000
 
 
+async def _read_bounded(response, limit: int) -> bytes:
+    """Read every upstream chunk through EOF without exceeding the size limit.
+
+    aiohttp StreamReader.read(n) can return fewer than n bytes even when
+    the response has not finished, notably with chunked transfer encoding.
+    """
+    payload = bytearray()
+    async for chunk in response.content.iter_chunked(64 * 1024):
+        if len(payload) + len(chunk) > limit:
+            raise ValueError('Upstream response exceeds size limit')
+        payload.extend(chunk)
+    return bytes(payload)
+
+
 class UpstreamUnauthorized(Exception):
     """No credentials or upstream URL included in this exception."""
 
@@ -73,9 +87,7 @@ class Bridge:
                         raise ValueError('Viewer not available')
                     if res.content_length and res.content_length > MAX_HTML:
                         raise ValueError('Viewer page oversized')
-                    payload = await res.content.read(MAX_HTML + 1)
-                    if len(payload) > MAX_HTML:
-                        raise ValueError('Viewer page oversized')
+                    payload = await _read_bounded(res, MAX_HTML)
                 result = parse_viewer(viewer_id, payload.decode('utf-8', 'replace'), facility.name, facility.stream_origin)
             except (ClientError, asyncio.TimeoutError, UnicodeError, ValueError) as exc:
                 LOG.warning('Metadata refresh failed for viewer %d (%s)', viewer_id, type(exc).__name__)
@@ -156,9 +168,7 @@ async def _read_playlist(bridge: Bridge, upstream: str, viewer_id: int) -> web.R
                 raise web.HTTPServiceUnavailable(text='Upstream stream is not available')
             if res.content_length and res.content_length > MAX_MANIFEST:
                 raise web.HTTPBadGateway(text='Invalid upstream playlist')
-            raw = await res.content.read(MAX_MANIFEST + 1)
-            if len(raw) > MAX_MANIFEST:
-                raise web.HTTPBadGateway(text='Invalid upstream playlist')
+            raw = await _read_bounded(res, MAX_MANIFEST)
         content = rewrite_playlist(raw.decode('utf-8-sig'), upstream, viewer_id, bridge.tokens)
     except (ClientError, asyncio.TimeoutError, UnicodeError, ValueError, RuntimeError):
         raise web.HTTPBadGateway(text='Unable to process upstream playlist') from None
