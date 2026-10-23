@@ -147,6 +147,7 @@ async def info(request: web.Request) -> web.Response:
         result.append({
             'viewer_id': viewer_id,
             'facility': facility.name,
+            'access_scope': facility.access_scope(viewer_id),
             'name': metadata.name if metadata else f'Camera {viewer_id}',
             'camera_number': metadata.camera_num if metadata else None,
             'viewer_metadata_available': metadata is not None,
