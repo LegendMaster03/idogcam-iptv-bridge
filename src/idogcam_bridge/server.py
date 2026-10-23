@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 from .config import Settings
-from .guide import PublishedNoticeCache, make_xmltv
+from .guide import PublishedNoticeCache, make_xmltv, published_schedule_status
 from .hls import TokenMap, rewrite_playlist, same_origin
 from .viewer import ViewerMetadata, parse_viewer
 
@@ -152,6 +152,8 @@ async def info(request: web.Request) -> web.Response:
             'viewer_metadata_available': metadata is not None,
             'offline_message': metadata.offline_message if metadata else None,
             'stream_resolvable': bool(metadata and metadata.stream_url),
+            'published_schedule': published_schedule_status(
+                metadata.offline_message if metadata else None, facility.time_zone),
             # Deliberately no 'online' status: that requires an HLS fetch.
         })
     return web.json_response({'channels': result}, headers={'Cache-Control': 'no-store'})

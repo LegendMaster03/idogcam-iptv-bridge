@@ -126,6 +126,50 @@ def parse_published_hours(message: str | None) -> PublishedHours | None:
     return PublishedHours(available, bool(re.search(r'\bdaily\b|\bevery day\b', normalized, re.I)))
 
 
+
+def published_schedule_status(notice: str | None, time_zone: str | None,
+                              now: datetime | None = None) -> dict | None:
+    """Describe published hours, not verified online status.
+
+    `now` must be timezone-aware. Never infer a facility time zone.
+    Missing or ambiguous notices cannot establish a viewing schedule.
+    """
+    published = parse_published_hours(notice)
+    if published is None or not time_zone:
+        return None
+    current = now if now is not None else datetime.now().astimezone()
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError('now must have timezone information')
+    zone = ZoneInfo(time_zone)
+    local = current.astimezone(zone)
+    minute_of_day = local.hour * 60 + local.minute + local.second / 60
+    today = local.date()
+    inside = any(a <= minute_of_day < b for a, b in published.windows)
+    next_start = None
+    window_end = None
+    for day_offset in range(3):
+        day = today + timedelta(days=day_offset)
+        for begin, end in published.windows:
+            starts = datetime.combine(day, time(begin // 60, begin % 60), tzinfo=zone)
+            ends = datetime.combine(day, time(end // 60, end % 60), tzinfo=zone)
+            if day_offset == 0 and begin <= minute_of_day < end:
+                window_end = ends.isoformat()
+            if starts > local and next_start is None:
+                next_start = starts.isoformat()
+    return {
+        'basis': 'official_viewer_notice',
+        'time_zone': time_zone,
+        'daily_recurrence_explicit': published.recurring_explicitly,
+        'within_published_window': inside,
+        'next_window_start': next_start,
+        'current_window_end': window_end,
+        'windows_local': [
+            {'start': f'{begin // 60:02d}:{begin % 60:02d}',
+             'end': f'{end // 60:02d}:{end % 60:02d}'}
+            for begin, end in published.windows
+        ],
+    }
+
 def _stamp(day, minutes: int, zone: ZoneInfo) -> str:
     if minutes == 1440:
         day = day + timedelta(days=1)
@@ -171,28 +215,17 @@ def make_xmltv(channels: list[tuple[int, Facility, ViewerMetadata | None]],
         day0 = current.astimezone(chosen_zone).date()
         description = (f'Official viewer notice: {notice}' if notice else
                        'The official viewer has not published a usable operating-hours notice.')
-        for delta in range(_GUIDE_DAYS):
-            day = day0 + timedelta(days=delta)
-            if published and zone:
-                intervals = []
-                cursor = 0
-                for begin, finish in published.windows:
-                    if cursor < begin:
-                        intervals.append((cursor, begin, False))
-                    intervals.append((begin, finish, True))
-                    cursor = finish
-                if cursor < 1440:
-                    intervals.append((cursor, 1440, False))
-                for start, end, available in intervals:
-                    title = ('Published viewing window' if available else
-                             'Outside published viewing window')
-                    caution = ('The daily recurrence is explicitly stated.' if published.recurring_explicitly
-                               else 'Daily recurrence is inferred from an undated viewer notice.')
-                    _programme(root, channel_id, day, start, end, chosen_zone, title,
+        # EPG slots represent *possible viewing*, not programmes or confirmed
+        # online state. Do not fabricate all-day offline programmes: Jellyfin
+        # otherwise makes a closed camera look like a show that is airing.
+        if published and zone:
+            caution = ('The daily recurrence is explicitly stated.' if published.recurring_explicitly
+                       else 'Daily recurrence is inferred from an undated viewer notice.')
+            for delta in range(_GUIDE_DAYS):
+                day = day0 + timedelta(days=delta)
+                for start, end in published.windows:
+                    _programme(root, channel_id, day, start, end, chosen_zone,
+                               'Camera viewing hours',
                                description + ' ' + caution +
-                               ' This guide is not a live camera availability check.')
-            else:
-                reason = ('Facility time zone is not configured. ' if published and not zone else '')
-                _programme(root, channel_id, day, 0, 1440, chosen_zone,
-                           'Schedule information unavailable', reason + description)
+                               ' This window does not verify that the camera is online.')
     return ET.tostring(root, encoding='utf-8', xml_declaration=True)
