@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "metadata_ttl_seconds": 300,
+  "facilities": [
+    {
+      "key": "dogbeach-ponte-vedra",
+      "name": "DogBeach - Ponte Vedra Beach",
+      "adapter": "gingr_v2",
+      "viewer_ids": [10088, 10089, 3782],
+      "stream_origin": "https://dogbeach.viewidogcam.com:10000"
+    }
+  ]
+}

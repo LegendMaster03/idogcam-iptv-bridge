@@ -1,1 +1,11 @@
-# Bootstrap repository; full source imported through feature branch.
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+config.json
+secrets/
+*.har
+.env
+build/
+dist/
+.venv/

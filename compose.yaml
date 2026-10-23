@@ -1,0 +1,28 @@
+services:
+  idogcam-bridge:
+    build: .
+    container_name: idogcam-bridge
+    restart: unless-stopped
+    environment:
+      IDOGCAM_CONFIG: /config/config.json
+      IDOGCAM_BASE_URL: http://idogcam-bridge:8080
+      IDOGCAM_PORT: "8080"
+    volumes:
+      - ./config.json:/config/config.json:ro
+    networks:
+      - jellyfin
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+
+networks:
+  jellyfin:
+    external: true
+    name: ix-jellyfin_default
