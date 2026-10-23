@@ -53,3 +53,12 @@ def test_duplicate_ids_rejected(tmp_path):
         {'key':'a', 'adapter':'gingr_v2','name':'A','viewer_ids':[10088,10088]}]}))
     with pytest.raises(ValueError):
         load_settings(source)
+
+@pytest.mark.parametrize('pending', [[10088], [10089,10089], [-1], ['x'], [True]])
+def test_rejects_invalid_pending(tmp_path, pending):
+    file = tmp_path / 'config.json'
+    file.write_text(json.dumps({'schema_version': 2, 'facilities': [
+        {'key': 'a', 'adapter': 'gingr_v2', 'name': 'A',
+         'viewer_ids': [10088], 'pending_viewer_ids': pending}]}))
+    with pytest.raises(ValueError):
+        load_settings(file)

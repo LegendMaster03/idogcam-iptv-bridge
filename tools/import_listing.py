@@ -57,9 +57,9 @@ def facility_candidates(page: str, facility, *, listing_url: str) -> list[tuple[
 def apply_import(config_path: Path, facility_key: str, ids: list[int]) -> None:
     raw = json.loads(config_path.read_text(encoding='utf-8'))
     selected = next(row for row in raw['facilities'] if row['key'] == facility_key)
-    original = list(selected['viewer_ids'])
-    existing = {int(cam) for item in raw['facilities'] for cam in item['viewer_ids']}
-    selected['viewer_ids'] = original + [cam for cam in ids if cam not in existing]
+    pending = list(selected.get('pending_viewer_ids', []))
+    existing = {int(cam) for item in raw['facilities'] for cam in (*item['viewer_ids'], *item.get('pending_viewer_ids', []))}
+    selected['pending_viewer_ids'] = pending + [cam for cam in ids if cam not in existing]
     fd, temp_path = tempfile.mkstemp(prefix='.idogcam-config-', dir=config_path.parent)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
@@ -95,7 +95,7 @@ def main() -> int:
             page = args.listing_file.read_text(encoding='utf-8')
             listing_url = 'https://idogcam.com/idcviewcams.php'
         candidates = facility_candidates(page, facility, listing_url=listing_url)
-        already = set(settings.cameras)
+        already = {v for f in settings.facilities for v in (*f.viewer_ids, *f.pending_viewer_ids)}
         added = [(cam, name) for cam, name in candidates if cam not in already]
         print(f'Officially linked viewers for {facility.name}: {len(candidates)}')
         print(f'New verified viewers: {len(added)}')
@@ -103,7 +103,7 @@ def main() -> int:
             print(f'  {camera_id}: {name}')
         if args.apply and added:
             apply_import(args.config, facility.key, [cam for cam, _ in added])
-            print('Updated local config.json; restart the bridge to load changes.')
+            print('Staged discovered viewers in pending_viewer_ids. They are NOT published to Jellyfin.')
         else:
             print('No configuration changes made.' if not args.apply else 'No new viewers to import.')
         return 0
