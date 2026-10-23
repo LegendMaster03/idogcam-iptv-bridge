@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.0)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.1)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -26,7 +26,7 @@ Authentication is **not bypassed**. The official viewer supplies authorization, 
 | --- | --- |
 | `/healthz` | Bridge process liveness |
 | `/channels.m3u` | M3U containing configured cameras |
-| `/api/channels` | Viewer IDs, names, camera numbers, offline messages, stream-resolvable flag; **no upstream secrets** |
+| `/api/channels` | Viewer IDs, names, camera numbers, offline messages, published-hours status and next opening; **no upstream secrets** |
 | `/xmltv.xml` | Eight-day XMLTV guide based on published camera-hour notices, or informational blocks when the schedule cannot be parsed |
 | `/hls/{viewer_id}/index.m3u8` | Authorized, rewritten HLS manifest or HTTP 503 |
 | `/media/{viewer_id}/{token}.ts` | Proxied HLS segment, with temporary opaque token |
@@ -167,7 +167,8 @@ http://idogcam-bridge:8080/xmltv.xml
 
 Save the provider, map the guide channels by the same viewer IDs as the M3U tuner
 (`10088`, `10089`, `3782` for Dog Beach), and refresh guide data. The bridge
-returns eight days of contiguous programming; no media playback is required to
+returns eight days of viewing-window listings; gaps outside the hours are
+intentionally left without programme entries. No media playback is required to
 load these entries.
 
 **Configure each facility's IANA time zone.** For Dog Beach, the example config
@@ -179,11 +180,14 @@ container after editing `config.json`.
 
 The schedule is inferred from the **official viewer's free-text notice**, not
 from a provider scheduling API. Recognized single daily intervals and an
-explicitly identified break become "Published viewing window" and "Outside
-published viewing window" guide blocks. The original wording and any inferred
-recurrence are stated in the guide description. These are **not current-camera
-online/offline indicators**. Ambiguous announcements remain informational, not
-invented schedules. The notice may appear only when a camera is offline.
+explicitly identified break generate **only** "Camera viewing hours" guide entries.
+Closed hours and unrecognized schedules do not create fake TV programmes.
+The original wording and any inferred recurrence are stated in the guide
+description. These are **not current-camera online/offline indicators**.
+For clearer state information, `/api/channels` includes `published_schedule`,
+with `within_published_window`, `next_window_start`, and `current_window_end`.
+These are derived from the official notice, not live video availability.
+The notice may appear only when a camera is offline.
 
 The bridge retains only the last published *notice text* (never credentials or
 upstream URLs) in a private Docker volume named `notice-state`. The notice

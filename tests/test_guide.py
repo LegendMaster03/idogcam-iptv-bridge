@@ -7,7 +7,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from idogcam_bridge.config import Facility, Settings, load_settings
-from idogcam_bridge.guide import make_xmltv, parse_published_hours
+from idogcam_bridge.guide import make_xmltv, parse_published_hours, published_schedule_status
 from idogcam_bridge.server import BRIDGE_KEY, create_app
 from idogcam_bridge.viewer import ViewerMetadata
 
@@ -57,11 +57,9 @@ def test_xmltv_dogbeach_all_channels_and_daily_break():
                and p.attrib['start'].startswith('20261024')]
     assert [(p.attrib['start'][8:12], p.attrib['stop'][8:12], p.findtext('title'))
             for p in entries] == [
-        ('0000', '0800', 'Outside published viewing window'),
-        ('0800', '1100', 'Published viewing window'),
-        ('1100', '1300', 'Outside published viewing window'),
-        ('1300', '1700', 'Published viewing window'),
-        ('1700', '0000', 'Outside published viewing window')]
+        ('0800', '1100', 'Camera viewing hours'),
+        ('1300', '1700', 'Camera viewing hours')]
+    assert 'Outside published viewing window' not in ET.tostring(root, encoding='unicode')
     assert all(' -0400' in p.attrib['start'] for p in entries)
     assert any('Daily recurrence is inferred' in p.findtext('desc') for p in entries)
     assert all('auth=' not in ET.tostring(root, encoding='unicode') for _ in (0,))
@@ -73,7 +71,7 @@ def test_xmltv_dst_offsets_change_at_transition():
     root = ET.fromstring(make_xmltv([(10088, facility, metadata)],
                                       now=datetime(2026, 10, 31, 14, tzinfo=ZoneInfo('America/New_York'))))
     starts = [p.attrib['start'] for p in root.findall('programme')
-              if p.findtext('title') == 'Published viewing window']
+              if p.findtext('title') == 'Camera viewing hours']
     assert any(s.startswith('20261031110000 -0400') for s in starts)
     assert any(s.startswith('20261101110000 -0500') for s in starts)
 
@@ -83,14 +81,13 @@ def test_unknown_schedule_or_timezone_produces_info_not_guessed_hours():
     facility = Facility('a', 'A', (10088,))
     root = ET.fromstring(make_xmltv([(10088, facility, metadata)],
                                       now=datetime(2026, 10, 24, tzinfo=ZoneInfo('UTC'))))
-    assert len(root.findall('programme')) == 8
-    assert all(p.findtext('title') == 'Schedule information unavailable' for p in root.findall('programme'))
-    assert 'time zone is not configured' in root.find('programme').findtext('desc')
+    assert len(root.findall('channel')) == 1
+    assert not root.findall('programme')
 
 
 def test_xmltv_escapes_markup():
     facility = Facility('a', 'A', (101,), time_zone='UTC')
-    meta = ViewerMetadata(101, 'A - Pool & Spa', 'Pool & Spa', None, 'Hours unavailable <now>')
+    meta = ViewerMetadata(101, 'A - Pool & Spa', 'Pool & Spa', None, 'Cam Online 8am-5pm Daily <now>')
     raw = make_xmltv([(101, facility, meta)], now=datetime(2026, 10, 24, tzinfo=ZoneInfo('UTC')))
     assert b'Pool &amp; Spa' in raw and b'&lt;now&gt;' in raw
     assert ET.fromstring(raw).find('channel').findtext('display-name') == 'Pool & Spa'
@@ -159,3 +156,72 @@ def test_notice_cache_rejects_invalid_data(tmp_path):
     path = tmp_path / 'notices.json'
     path.write_text('{broken')
     assert PublishedNoticeCache(str(path)).get(10088) is None
+
+
+def test_sparse_schedule_has_no_fabricated_off_air_programmes():
+    zone = ZoneInfo('America/New_York')
+    fac = Facility('a', 'A', (10088,), time_zone='America/New_York')
+    cam = ViewerMetadata(10088, 'A - Cam', 'Cam', None,
+                         'Camera access is from 8am - 5pm with a break from 11am - 1pm.')
+    xml = make_xmltv([(10088, fac, cam)], now=datetime(2026, 10, 24, 12, tzinfo=zone))
+    root = ET.fromstring(xml)
+    programmes = [p for p in root.findall('programme') if p.attrib['start'].startswith('20261024')]
+    assert len(programmes) == 2
+    assert all(p.findtext('title') == 'Camera viewing hours' for p in programmes)
+    assert 'Outside published viewing window' not in xml.decode()
+    assert 'Schedule information unavailable' not in xml.decode()
+    assert all('not verify' in p.findtext('desc') for p in programmes)
+
+
+def test_published_schedule_status_covers_break_and_next_opening():
+    zone = ZoneInfo('America/New_York')
+    notice = 'Camera access is from 8am - 5pm with a break from 11am - 1pm.'
+    status = published_schedule_status(notice, 'America/New_York',
+                                       now=datetime(2026, 10, 24, 12, tzinfo=zone))
+    assert status['within_published_window'] is False
+    assert status['next_window_start'] == '2026-10-24T13:00:00-04:00'
+    assert status['current_window_end'] is None
+    assert status['daily_recurrence_explicit'] is False
+    assert status['windows_local'] == [
+        {'start': '08:00', 'end': '11:00'},
+        {'start': '13:00', 'end': '17:00'},
+    ]
+    status = published_schedule_status(notice, 'America/New_York',
+                                       now=datetime(2026, 10, 24, 13, 45, tzinfo=zone))
+    assert status['within_published_window'] is True
+    assert status['current_window_end'] == '2026-10-24T17:00:00-04:00'
+    assert status['next_window_start'] == '2026-10-25T08:00:00-04:00'
+
+
+def test_published_status_handles_next_day_and_dst():
+    zone = ZoneInfo('America/New_York')
+    notice = 'Cam Online 8am-5pm Daily'
+    result = published_schedule_status(notice, 'America/New_York',
+                                       now=datetime(2026, 10, 31, 19, tzinfo=zone))
+    assert result['next_window_start'] == '2026-11-01T08:00:00-05:00'
+    assert result['daily_recurrence_explicit'] is True
+
+
+def test_published_status_unknown_is_not_online_indicator():
+    assert published_schedule_status('Camera online', 'America/New_York') is None
+    assert published_schedule_status('Cam Online 8am-5pm Daily', None) is None
+    with pytest.raises(ValueError, match='timezone'):
+        published_schedule_status('Cam Online 8am-5pm Daily', 'America/New_York',
+                                  now=datetime(2026, 10, 24))
+
+
+@pytest.mark.asyncio
+async def test_channels_api_exposes_schedule_without_claiming_live():
+    fac = Facility('a', 'A', (10088,), time_zone='America/New_York')
+    app = create_app(Settings((fac,)))
+    async def meta(viewer_id):
+        return ViewerMetadata(viewer_id, 'A - Cam', 'Cam', None, 'Cam Online 8am-5pm Daily')
+    app[BRIDGE_KEY].metadata = meta
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get('/api/channels')
+        assert response.status == 200
+        channel = (await response.json())['channels'][0]
+        assert channel['stream_resolvable'] is False
+        assert channel['published_schedule']['basis'] == 'official_viewer_notice'
+        assert channel['published_schedule']['windows_local'] == [{'start':'08:00','end':'17:00'}]
+        assert 'online' not in channel
