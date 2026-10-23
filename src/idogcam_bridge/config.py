@@ -14,6 +14,7 @@ class Facility:
     name: str
     viewer_ids: tuple[int, ...]
     stream_origin: str | None = None
+    pending_viewer_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,14 +72,17 @@ def load_settings(path: str | Path) -> Settings:
         if not name or len(name) > 120 or any(c in name for c in '\r\n"'):
             raise ValueError('Invalid facility name')
         viewer_ids = tuple(item['viewer_ids'])
+        pending_ids = tuple(item.get('pending_viewer_ids', []))
         if not viewer_ids or len(viewer_ids) != len(set(viewer_ids)):
             raise ValueError('Facility must have unique, nonempty camera IDs')
-        for viewer_id in viewer_ids:
+        if len(pending_ids) != len(set(pending_ids)) or set(pending_ids) & set(viewer_ids):
+            raise ValueError('Invalid pending IDs')
+        for viewer_id in (*viewer_ids, *pending_ids):
             if type(viewer_id) is not int or viewer_id <= 0 or viewer_id in ids:
                 raise ValueError('Camera IDs must be unique positive integers across facilities')
             ids.add(viewer_id)
         origin = validate_stream_origin(item['stream_origin']) if item.get('stream_origin') else None
-        facilities.append(Facility(key, name, viewer_ids, origin))
+        facilities.append(Facility(key, name, viewer_ids, origin, pending_ids))
     if not facilities:
         raise ValueError('At least one facility is required')
     ttl = raw.get('metadata_ttl_seconds', 300)

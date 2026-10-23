@@ -13,15 +13,16 @@ MAX_LISTING_BYTES = 1_000_000
 MAX_IMPORT_CANDIDATES = 50
 
 
-class _Anchors(HTMLParser):
+class _ViewerLinks(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.hrefs: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() == 'a':
+        if tag.lower() in ('a', 'iframe'):
+            field = 'href' if tag.lower() == 'a' else 'src'
             for key, value in attrs:
-                if key.lower() == 'href' and value:
+                if key.lower() == field and value:
                     self.hrefs.append(value)
 
 
@@ -42,7 +43,7 @@ def extract_viewer_ids(page: str, *, listing_url: str) -> tuple[int, ...]:
     and unknown URL formats. The caller verifies each official page's facility.
     """
     validate_official_listing_url(listing_url)
-    parser = _Anchors()
+    parser = _ViewerLinks()
     parser.feed(page)
     found: set[int] = set()
     for href in parser.hrefs:

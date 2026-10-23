@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.3.0)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.3.1)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -111,6 +111,26 @@ distinguishes password-free group cameras from cameras requiring account
 login, check-in, payment, or an assigned password. Do not scan numeric IDs.
 Provider-specific login must be verified before accepting customer credentials.
 Also, Jellyfin's shared M3U tuner is not a per-customer access-control system.
+
+## Private listing imports and shared Jellyfin tuners
+
+Jellyfin's M3U tuner is shared with all Jellyfin users. New viewers imported
+from public or authenticated camera listings are now staged in
+`pending_viewer_ids` (not in the active `viewer_ids` list). They are not
+published by `/channels.m3u` or accessible through the HLS bridge.
+
+After independently confirming that a camera is appropriate to share with
+all users, explicitly publish it:
+
+```bash
+python3 tools/promote_public.py --config config.json --facility dogbeach-ponte-vedra --ids 10089 --confirm-public
+```
+
+Do not promote customer-specific or reservation-restricted cameras. No
+provider login API for ordinary Gingr customers has been verified; entering
+an arbitrary password into this bridge would not establish authorization.
+Use an authorized saved listing for staging, and never commit credentials,
+cookies, or HAR session values. Existing configured cameras are unchanged.
 
 ## Scope and limitations
 

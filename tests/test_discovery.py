@@ -63,7 +63,8 @@ def test_import_preserves_existing_and_other_facilities(tmp_path, monkeypatch):
     ]}))
     tool.apply_import(config, 'dogbeach', [10089, 3782, 9876])
     updated = json.loads(config.read_text())
-    assert updated['facilities'][0]['viewer_ids'] == [10088, 10089, 3782]
+    assert updated['facilities'][0]['viewer_ids'] == [10088]
+    assert updated['facilities'][0]['pending_viewer_ids'] == [10089, 3782]
     assert updated['facilities'][1]['viewer_ids'] == [9876]
 
 
@@ -78,3 +79,41 @@ def test_facility_metadata_verification(monkeypatch):
             '<a href="/idogcamgingrviewv2.php?id=10089">b</a>')
     facility = Facility('dogbeach','DogBeach - Ponte Vedra Beach',(10088,))
     assert tool.facility_candidates(html, facility, listing_url='https://idogcam.com/idcviewcams.php') == [(10088,'Sandcastle Play Field')]
+
+
+def test_import_stages_instead_of_exposing(tmp_path):
+    import importlib.util
+    from idogcam_bridge.config import load_settings
+    spec = importlib.util.spec_from_file_location('import_listing', Path(__file__).resolve().parents[1] / 'tools' / 'import_listing.py')
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'schema_version': 2, 'facilities': [
+        {'key': 'a', 'adapter': 'gingr_v2', 'name': 'A', 'viewer_ids': [10088]}]}))
+    tool.apply_import(path, 'a', [10089])
+    settings = load_settings(path)
+    assert set(settings.cameras) == {10088}
+    assert settings.facilities[0].pending_viewer_ids == (10089,)
+
+
+def test_verified_iframe_link_extraction():
+    source = '<iframe src="/idogcamgingrviewv2.php?id=10089"></iframe><div data-id="99999"></div>'
+    assert extract_viewer_ids(source, listing_url='https://idogcam.com/idcviewcams.php') == (10089,)
+
+
+def test_public_promotion_explicit(tmp_path):
+    import importlib.util
+    from idogcam_bridge.config import load_settings
+    spec = importlib.util.spec_from_file_location('promote_public', Path(__file__).resolve().parents[1] / 'tools' / 'promote_public.py')
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'schema_version': 2, 'facilities': [
+        {'key': 'a', 'adapter': 'gingr_v2', 'name': 'A',
+         'viewer_ids': [10088], 'pending_viewer_ids': [10089, 3782]}]}))
+    with pytest.raises(ValueError):
+        tool.promote(path, 'a', (98765,))
+    tool.promote(path, 'a', (10089,))
+    settings = load_settings(path)
+    assert set(settings.cameras) == {10088, 10089}
+    assert settings.facilities[0].pending_viewer_ids == (3782,)
