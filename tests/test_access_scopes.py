@@ -140,3 +140,19 @@ async def test_status_api_scopes_are_nonsecret_and_pending_hidden(tmp_path):
         playlist = await (await client.get('/channels.m3u')).text()
         assert '10088' in playlist
         assert '10089' not in playlist
+
+
+@pytest.mark.parametrize('tool, action', [
+    ('classify_access', 'classify'),
+    ('promote_public', 'promote'),
+])
+def test_config_update_preserves_existing_read_permissions(tmp_path, tool, action):
+    import stat
+    path = config_file(tmp_path)
+    path.chmod(0o644)
+    module = load_tool(tool)
+    if action == 'classify':
+        module.classify(path, 'dogbeach', (10088,), 'shared_customer')
+    else:
+        module.promote(path, 'dogbeach', (10089,), scope='shared_customer')
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
