@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.1)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.2)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -26,7 +26,7 @@ Authentication is **not bypassed**. The official viewer supplies authorization, 
 | --- | --- |
 | `/healthz` | Bridge process liveness |
 | `/channels.m3u` | M3U containing configured cameras |
-| `/api/channels` | Viewer IDs, names, camera numbers, offline messages, published-hours status and next opening; **no upstream secrets** |
+| `/api/channels` | Viewer IDs, names, local access classifications, camera numbers, offline messages, published-hours status and next opening; **no upstream secrets** |
 | `/xmltv.xml` | Eight-day XMLTV guide based on published camera-hour notices, or informational blocks when the schedule cannot be parsed |
 | `/hls/{viewer_id}/index.m3u8` | Authorized, rewritten HLS manifest or HTTP 503 |
 | `/media/{viewer_id}/{token}.ts` | Proxied HLS segment, with temporary opaque token |
@@ -102,8 +102,7 @@ python3 tools/import_listing.py --config config.json \
 The default is a **read-only preview**. Once you have reviewed the listed
 IDs, add `--apply` to stage them in `pending_viewer_ids`; the new channels
 are deliberately hidden from the shared Jellyfin tuner. The original camera
-list is never replaced. See **Protected discovery** below for manual public
-promotion.
+list is never replaced. See **Protected discovery** below for manual publication after access review.
 
 For public pages hosted on the official iDogCam site, use
 `--listing-url https://www.idogcam.com/idcviewcams.php` instead. A page
@@ -120,6 +119,46 @@ Support for credential-assisted listing discovery must follow a documented or
 independently validated authorized sign-in flow, with secrets stored outside
 the Git repository and appropriately scoped to Jellyfin users. A facility-wide
 M3U tuner does not enforce per-customer access by itself.
+
+## Camera access classification
+
+The bridge distinguishes three administrator-reviewed access types:
+
+- **public** — cameras intended for public viewing.
+- **shared_customer** — shared play-area/group cameras available to the authorized
+  household through the official viewer. These are not inherently public.
+- **private** — boarding-room or customer-specific cameras. These must remain
+  pending; the bridge rejects publishing them to the shared Jellyfin tuner.
+
+The optional `access_scopes` map is keyed by official viewer ID, not HLS camera
+number. Preexisting published cameras without a classification remain accessible
+for backward compatibility but report `unreviewed`; they are **not** presumed
+public. Scope classification does not change upstream authorization.
+
+The Dog Beach example marks 10088, 10089 and 3782 as `shared_customer`.
+The authorization still comes from the official viewer. Only use this category
+where every user of the Jellyfin server is legitimately authorized.
+
+Classify previously published Dog Beach channels on an installed TrueNAS bridge:
+
+```bash
+python3 tools/classify_access.py --config config.json \
+  --facility dogbeach-ponte-vedra \
+  --ids 10088 10089 3782 --scope shared_customer --confirm-shared-household
+```
+
+Publish a **new pending** group camera only after reviewing its access scope:
+
+```bash
+python3 tools/promote_public.py --config config.json \
+  --facility dogbeach-ponte-vedra --ids 12345 \
+  --scope shared_customer --confirm-shared-household
+```
+
+For genuinely public cameras use `--scope public --confirm-public`.
+Private cameras are never publishable through this tool. No camera is promoted
+automatically. The classification in `/api/channels` is informative, not an
+authorization grant or a per-user Jellyfin access check.
 
 ## Protected discovery: quarantine before publication
 
@@ -142,7 +181,8 @@ python3 tools/promote_public.py --config config.json \
 ```
 
 This is a **manual access-scope assertion**, not an authorization bypass or a
-provider permissions check. Never promote customer-specific or private room
+provider permissions check. Reviewed shared group cameras may instead use
+`--scope shared_customer --confirm-shared-household`. Never promote customer-specific or private room
 cameras in a shared Jellyfin installation. Promotion changes only local
 `config.json`; restart the bridge to apply. Previously configured Dog Beach
 cameras remain published and unchanged.

@@ -17,6 +17,11 @@ class Facility:
     stream_origin: str | None = None
     pending_viewer_ids: tuple[int, ...] = ()
     time_zone: str | None = None
+    access_scopes: tuple[tuple[int, str], ...] = ()
+
+    def access_scope(self, viewer_id: int) -> str:
+        """Local publication classification, not proof of provider authorization."""
+        return dict(self.access_scopes).get(viewer_id, 'unreviewed')
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,23 @@ def load_settings(path: str | Path) -> Settings:
             if type(viewer_id) is not int or viewer_id <= 0 or viewer_id in ids:
                 raise ValueError('Camera IDs must be unique positive integers across facilities')
             ids.add(viewer_id)
+        # Local access classification does not grant provider authorization.
+        # Private cameras must not be published to a shared Jellyfin tuner.
+        raw_scopes = item.get('access_scopes', {})
+        if not isinstance(raw_scopes, dict):
+            raise ValueError('access_scopes must map viewer ID strings to access types')
+        access_scopes: list[tuple[int, str]] = []
+        known_ids = set((*viewer_ids, *pending_ids))
+        for viewer_key, scope in raw_scopes.items():
+            if (not isinstance(viewer_key, str) or
+                    not re.fullmatch(r'[1-9][0-9]*', viewer_key) or
+                    int(viewer_key) not in known_ids or
+                    scope not in ('public', 'shared_customer', 'private')):
+                raise ValueError('Invalid access scope mapping')
+            camera_id = int(viewer_key)
+            if camera_id in viewer_ids and scope == 'private':
+                raise ValueError('Private cameras can not be published to shared M3U')
+            access_scopes.append((camera_id, scope))
         origin = validate_stream_origin(item['stream_origin']) if item.get('stream_origin') else None
         timezone = item.get('time_zone')
         if timezone is not None:
@@ -94,7 +116,8 @@ def load_settings(path: str | Path) -> Settings:
                 ZoneInfo(timezone)
             except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
                 raise ValueError('Unknown facility time zone') from exc
-        facilities.append(Facility(key, name, viewer_ids, origin, pending_ids, timezone))
+        facilities.append(Facility(key, name, viewer_ids, origin, pending_ids, timezone,
+                                   tuple(access_scopes)))
     if not facilities:
         raise ValueError('At least one facility is required')
     ttl = raw.get('metadata_ttl_seconds', 300)
