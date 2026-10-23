@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -65,7 +66,7 @@ def apply_import(config_path: Path, facility_key: str, ids: list[int]) -> None:
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
             json.dump(raw, handle, indent=2)
             handle.write('\n')
-        os.chmod(temp_path, 0o600)
+        os.chmod(temp_path, stat.S_IMODE(config_path.stat().st_mode))
         os.replace(temp_path, config_path)
     finally:
         if os.path.exists(temp_path):

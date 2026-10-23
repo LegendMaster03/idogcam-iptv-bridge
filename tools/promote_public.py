@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -43,7 +44,7 @@ def promote(config_path: Path, facility_key: str, ids: tuple[int, ...],
         with os.fdopen(fd, 'w', encoding='utf-8') as output:
             json.dump(raw, output, indent=2)
             output.write('\n')
-        os.chmod(path, 0o600)
+        os.chmod(path, stat.S_IMODE(config_path.stat().st_mode))
         load_settings(path)
         os.replace(path, config_path)
     finally:

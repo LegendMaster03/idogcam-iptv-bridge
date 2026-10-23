@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -35,7 +36,7 @@ def classify(config_path: Path, facility_key: str,
         with os.fdopen(fd, 'w', encoding='utf-8') as out:
             json.dump(raw, out, indent=2)
             out.write('\n')
-        os.chmod(tmp, 0o600)
+        os.chmod(tmp, stat.S_IMODE(config_path.stat().st_mode))
         load_settings(tmp)
         os.replace(tmp, config_path)
     finally:

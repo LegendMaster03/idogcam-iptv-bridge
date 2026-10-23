@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.2)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.3)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -157,7 +157,11 @@ python3 tools/promote_public.py --config config.json \
 
 For genuinely public cameras use `--scope public --confirm-public`.
 Private cameras are never publishable through this tool. No camera is promoted
-automatically. The classification in `/api/channels` is informative, not an
+automatically.
+
+Configuration-writing tools preserve the existing file mode. The container runs
+as UID 568, so `config.json` must remain readable by that user. If it was
+readable before an update, it remains readable afterward. The classification in `/api/channels` is informative, not an
 authorization grant or a per-user Jellyfin access check.
 
 ## Protected discovery: quarantine before publication

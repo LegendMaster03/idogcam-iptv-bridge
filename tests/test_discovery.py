@@ -117,3 +117,18 @@ def test_public_promotion_explicit(tmp_path):
     settings = load_settings(path)
     assert set(settings.cameras) == {10088, 10089}
     assert settings.facilities[0].pending_viewer_ids == (3782,)
+
+
+def test_listing_import_preserves_config_permissions(tmp_path):
+    import importlib.util
+    import stat
+    spec = importlib.util.spec_from_file_location(
+        'import_listing', Path(__file__).resolve().parents[1] / 'tools' / 'import_listing.py')
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'schema_version': 2, 'facilities': [
+        {'key': 'dogbeach', 'adapter': 'gingr_v2', 'name': 'DogBeach', 'viewer_ids': [10088]}]}))
+    path.chmod(0o644)
+    tool.apply_import(path, 'dogbeach', [10089])
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
