@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from idogcam_bridge.config import Facility, load_settings, validate_stream_origin
 from idogcam_bridge.discovery import (
