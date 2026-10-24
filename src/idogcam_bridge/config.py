@@ -80,8 +80,10 @@ def load_settings(path: str | Path) -> Settings:
             raise ValueError('Invalid facility name')
         viewer_ids = tuple(item['viewer_ids'])
         pending_ids = tuple(item.get('pending_viewer_ids', []))
-        if not viewer_ids or len(viewer_ids) != len(set(viewer_ids)):
-            raise ValueError('Facility must have unique, nonempty published camera IDs')
+        if not viewer_ids and not pending_ids:
+            raise ValueError('Facility must have at least one published or pending camera')
+        if len(viewer_ids) != len(set(viewer_ids)):
+            raise ValueError('Facility published camera IDs must be unique')
         if len(pending_ids) != len(set(pending_ids)):
             raise ValueError('Facility pending camera IDs must be unique')
         if set(viewer_ids) & set(pending_ids):

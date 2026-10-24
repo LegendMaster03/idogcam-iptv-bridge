@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.4.3)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.5.0)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -95,6 +95,52 @@ To remove only the bridge service, run `sudo docker compose down` in its directo
 
 Version 0.1 used a secret file named `secrets/dogbeach-manifest-url` and `schema_version: 1`. Version 0.2 uses `schema_version: 2` and no secret file. Update `config.json` using the new example; do not reuse the old configuration. The Compose configuration no longer mounts `./secrets`. Once cutover is verified, securely remove the old credential file and temporary containers if no longer needed. **Nothing is automatically deleted from TrueNAS.**
 
+
+## Onboard another facility (v0.5)
+
+Dog Beach is only the initial integration. New Gingr V2 facilities can now be
+**staged without manually editing the JSON configuration**. This is deliberately
+a two-step workflow: identify authorized official viewer links and stage them
+unpublished; later, after confirming sharing rights, publish only those viewers
+that every Jellyfin user should be able to access. This is **not** a site-wide
+enumerator or a customer-login bypass.
+
+Given an official facility camera link, preview the metadata:
+
+```bash
+python3 tools/onboard_facility.py --config config.json \
+  --key example-pet-care --name "Example Pet Care" \
+  --time-zone America/New_York \
+  --viewer-url "https://idogcam.com/idogcamgingrviewv2.php?id=12345"
+```
+
+The ID shown here is an **illustrative placeholder**, not a known working camera.
+Use only a viewer link actually supplied by the facility or published in its
+official camera list. Repeat \`--viewer-url\` to stage several explicit links.
+Alternatively provide \`--listing-file /path/to/listing.html\` or
+\`--listing-url https://idogcam.com/official-page.php\`. Listing imports only
+recognize explicit official viewer links and verify that each viewer's official
+title begins with the exact supplied facility name.
+
+By default the command previews IDs and names only. Add \`--apply\` to create a
+new facility containing **only pending camera IDs**; the Jellyfin M3U and XMLTV
+stay unchanged. If a viewer page does not publish its streaming hostname,
+\`--stream-origin https://facility.viewidogcam.com:PORT\` can be supplied once
+that hostname is independently verified; do not supply tokens or passwords.
+
+Only after establishing that specific staged cameras are appropriate for the
+whole Jellyfin household, explicitly promote them through the existing
+\`tools/promote_public.py\` command with the appropriate \`--scope\` and
+confirmation flag. This does **not** establish upstream viewing permission.
+Do not publish private, reservation-limited, or other customer-specific cameras
+through Jellyfin's shared tuner.
+
+Known limitations: the iDogCam public directory is not currently known to
+expose a complete machine-readable camera list; many facilities use other
+viewer families or additional authorization arrangements, and Gingr's label
+"public cameras" can mean *public to logged-in customers*, not anonymous
+internet access. The Gingr V2 adapter must be verified for each new facility.
+No second facility has yet been tested end-to-end with Jellyfin.
 
 ## Importing cameras from an official listing (experimental)
 
