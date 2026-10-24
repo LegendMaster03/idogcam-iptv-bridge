@@ -224,8 +224,10 @@ def make_xmltv(channels: list[tuple[int, Facility, ViewerMetadata | None]],
             for delta in range(_GUIDE_DAYS):
                 day = day0 + timedelta(days=delta)
                 for start, end in published.windows:
+                    # The guide's visible title identifies what the viewer can watch.
+                    # The description, not the title, explains the schedule.
                     _programme(root, channel_id, day, start, end, chosen_zone,
-                               'Camera viewing hours',
+                               f'{facility.name} — {name}',
                                description + ' ' + caution +
                                ' This window does not verify that the camera is online.')
     return ET.tostring(root, encoding='utf-8', xml_declaration=True)

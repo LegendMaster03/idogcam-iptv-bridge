@@ -1,4 +1,4 @@
-# iDogCam IPTV Bridge — Gingr V2 prototype (v0.5.0)
+# iDogCam IPTV Bridge — Gingr V2 prototype (v0.5.1)
 
 An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3U tuner. The first verified viewer family is Gingr V2. The first configured facility is **DogBeach - Ponte Vedra Beach** (viewer IDs 10088, 10089, and 3782).
 
@@ -278,13 +278,14 @@ load these entries.
 **Configure each facility's IANA time zone.** For Dog Beach, the example config
 includes `"time_zone": "America/New_York"`. Existing `config.json` files must
 be updated because the deployment preserves user configuration. When a facility
-has no time zone, the bridge deliberately publishes only a schedule-information
-block, rather than assigning hours to an incorrect time zone. Restart the
+has no time zone, the bridge omits inferred programme entries rather than
+assigning hours to an incorrect time zone. Restart the
 container after editing `config.json`.
 
 The schedule is inferred from the **official viewer's free-text notice**, not
 from a provider scheduling API. Recognized single daily intervals and an
-explicitly identified break generate **only** "Camera viewing hours" guide entries.
+explicitly identified break generate **only** programme entries titled with the
+facility and camera names (for example, **DogBeach - Ponte Vedra Beach — Pool**).
 Closed hours and unrecognized schedules do not create fake TV programmes.
 The original wording and any inferred recurrence are stated in the guide
 description. These are **not current-camera online/offline indicators**.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idogcam-iptv-bridge"
-version = "0.5.0"
+version = "0.5.1"
 description = "On-demand iDogCam Gingr V2 HLS compatibility bridge for IPTV clients"
 requires-python = ">=3.11"
 dependencies = ["aiohttp>=3.10,<4"]
