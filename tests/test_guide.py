@@ -57,8 +57,8 @@ def test_xmltv_dogbeach_all_channels_and_daily_break():
                and p.attrib['start'].startswith('20261024')]
     assert [(p.attrib['start'][8:12], p.attrib['stop'][8:12], p.findtext('title'))
             for p in entries] == [
-        ('0800', '1100', 'Camera viewing hours'),
-        ('1300', '1700', 'Camera viewing hours')]
+        ('0800', '1100', 'DogBeach - Ponte Vedra Beach — Sandcastle Play Field'),
+        ('1300', '1700', 'DogBeach - Ponte Vedra Beach — Sandcastle Play Field')]
     assert 'Outside published viewing window' not in ET.tostring(root, encoding='unicode')
     assert all(' -0400' in p.attrib['start'] for p in entries)
     assert any('Daily recurrence is inferred' in p.findtext('desc') for p in entries)
@@ -71,7 +71,7 @@ def test_xmltv_dst_offsets_change_at_transition():
     root = ET.fromstring(make_xmltv([(10088, facility, metadata)],
                                       now=datetime(2026, 10, 31, 14, tzinfo=ZoneInfo('America/New_York'))))
     starts = [p.attrib['start'] for p in root.findall('programme')
-              if p.findtext('title') == 'Camera viewing hours']
+              if p.findtext('title') == 'A — Pool']
     assert any(s.startswith('20261031110000 -0400') for s in starts)
     assert any(s.startswith('20261101110000 -0500') for s in starts)
 
@@ -167,7 +167,7 @@ def test_sparse_schedule_has_no_fabricated_off_air_programmes():
     root = ET.fromstring(xml)
     programmes = [p for p in root.findall('programme') if p.attrib['start'].startswith('20261024')]
     assert len(programmes) == 2
-    assert all(p.findtext('title') == 'Camera viewing hours' for p in programmes)
+    assert all(p.findtext('title') == 'A — Cam' for p in programmes)
     assert 'Outside published viewing window' not in xml.decode()
     assert 'Schedule information unavailable' not in xml.decode()
     assert all('not verify' in p.findtext('desc') for p in programmes)
@@ -225,3 +225,37 @@ async def test_channels_api_exposes_schedule_without_claiming_live():
         assert channel['published_schedule']['basis'] == 'official_viewer_notice'
         assert channel['published_schedule']['windows_local'] == [{'start':'08:00','end':'17:00'}]
         assert 'online' not in channel
+
+
+def test_same_camera_name_in_different_facilities_has_distinct_programme_titles():
+    zone = ZoneInfo('UTC')
+    first = Facility('east', 'Eastside Pet Care', (101,), time_zone='UTC')
+    second = Facility('west', 'Westside Pet Care', (202,), time_zone='UTC')
+    sources = [
+        (101, first, ViewerMetadata(101, 'Eastside Pet Care - Pool', 'Pool', None,
+                                    'Pool groups are daily from 11am-1PM.')),
+        (202, second, ViewerMetadata(202, 'Westside Pet Care - Pool', 'Pool', None,
+                                     'Pool groups are daily from 11am-1PM.')),
+    ]
+    root = ET.fromstring(make_xmltv(sources, now=datetime(2026, 10, 24, 12, tzinfo=zone)))
+    by_channel = {}
+    for programme in root.findall('programme'):
+        by_channel.setdefault(programme.attrib['channel'], set()).add(
+            programme.findtext('title'))
+    assert by_channel == {
+        '101': {'Eastside Pet Care — Pool'},
+        '202': {'Westside Pet Care — Pool'},
+    }
+    assert all('not verify that the camera is online' in programme.findtext('desc')
+               for programme in root.findall('programme'))
+
+
+def test_guide_title_xml_escapes_facility_and_camera_names():
+    zone = ZoneInfo('UTC')
+    facility = Facility('spa', 'Paws & Play', (101,), time_zone='UTC')
+    camera = ViewerMetadata(101, 'Paws & Play - Pool <North>',
+                            'Pool <North>', None, 'Pool groups are daily from 11am-1PM.')
+    xml = make_xmltv([(101, facility, camera)], now=datetime(2026, 10, 24, 12, tzinfo=zone))
+    assert b'Paws &amp; Play' in xml
+    assert b'Pool &lt;North&gt;' in xml
+    assert ET.fromstring(xml).find('programme').findtext('title') == 'Paws & Play — Pool <North>'
