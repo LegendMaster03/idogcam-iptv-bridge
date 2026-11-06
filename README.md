@@ -4,7 +4,7 @@ An on-demand iDogCam HLS compatibility adapter that exposes a single Jellyfin M3
 
 ## Viewer-provided authorization
 
-The upstream HLS server **does enforce** the `auth` query parameter: the user's live test returned HTTP 200 with the value published by the official viewer, and HTTP 401 when it was omitted or invalid. The three official viewer pages expose the matching authorization value, including the Pool page while it is offline.
+The upstream HLS server **does enforce** the `auth` query parameter: a manual live verification returned HTTP 200 with the value published by the official viewer, and HTTP 401 when it was omitted or invalid. The three official viewer pages expose the matching authorization value, including the Pool page while it is offline.
 
 **v0.2 and later remove the captured-HAR credential dependency.** Instead of reading a saved tokenized source URL, the bridge retrieves each authorized viewer page and extracts the viewer's stream parameters. Credentials are held in process memory, refreshed with the viewer metadata (5 minutes by default), and refreshed immediately after a playlist HTTP 401. The M3U playlist and API expose no upstream URL, password, or auth parameter.
 
@@ -20,7 +20,7 @@ For the three configured Dog Beach Gingr V2 cameras, the only currently supporte
 4. Request the upstream HLS playlist and segments using the provider-supplied authorization. Refresh the viewer once after HTTP 401; fail closed if the provider does not supply a usable source.
 5. Serve stable internal playlist and media URLs to Jellyfin.
 
-No additional password-entry UI, customer account store, cookie vault, captured HAR token, or automated Gingr login is needed for **this verified viewer-page integration**. Those are not prerequisites for existing Dog Beach channels. Any future facility that genuinely requires a customer login may need a separate, **provider-specific authorized adapter**, but we should not build that until its legitimate access workflow is established.
+No additional password-entry UI, customer account store, cookie vault, captured HAR token, or automated Gingr login is needed for **this verified viewer-page integration**. Those are not prerequisites for existing Dog Beach channels. Any future facility that genuinely requires a customer login may need a separate, **provider-specific authorized adapter**, but such an adapter should not be implemented until its legitimate access workflow is established.
 
 The existing `access_scopes` and `pending_viewer_ids` are **publication controls**, not another upstream authentication system. Keep them: a working viewer link does not establish that a customer-specific camera should be shared with all Jellyfin users.
 
