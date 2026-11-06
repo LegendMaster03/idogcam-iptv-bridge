@@ -205,6 +205,8 @@ async def media(request: web.Request) -> web.StreamResponse:
     token = bridge.tokens.get(request.match_info['token'], viewer_id)
     if token is None or viewer_id not in bridge.settings.cameras:
         raise web.HTTPNotFound(text='Expired or unknown HLS resource')
+    # Opaque media tokens are valid only for the configured viewer and its
+    # current stream origin. Do not use a stale token to fetch another origin.
     source = await bridge.upstream_for(viewer_id)
     if source is None or not same_origin(source, token.upstream_url):
         raise web.HTTPServiceUnavailable(text='Camera is offline')
@@ -214,6 +216,8 @@ async def media(request: web.Request) -> web.StreamResponse:
         except UpstreamUnauthorized:
             await bridge.metadata(viewer_id, force_refresh=True)
             raise web.HTTPServiceUnavailable(text='Upstream authorization updated; reload channel') from None
+    # Never follow upstream redirects: media is retrieved only from the origin
+    # already validated against the viewer's current stream metadata.
     try:
         async with bridge._session().get(token.upstream_url, allow_redirects=False,
                                          headers={'Origin': 'https://idogcam.com', 'Referer': 'https://idogcam.com/'}) as upstream:
